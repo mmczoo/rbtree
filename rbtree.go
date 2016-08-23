@@ -21,19 +21,25 @@ type CompareFunc func(a, b Item) int
 
 type Tree struct {
 	// Root of the tree
-	root             *node
+	root *node
 
 	// The minimum and maximum nodes under the root.
 	minNode, maxNode *node
 
 	// Number of nodes under root, including the root
-	count            int
-	compare          CompareFunc
+	count   int
+	compare CompareFunc
+
+	inscmp CompareFunc
 }
 
 // Create a new empty tree.
 func NewTree(compare CompareFunc) *Tree {
 	return &Tree{compare: compare}
+}
+
+func NewTree2(compare, inscmp CompareFunc) *Tree {
+	return &Tree{compare: compare, inscmp: inscmp}
 }
 
 // Return the number of elements in the tree.
@@ -66,7 +72,7 @@ func (root *Tree) Max() Iterator {
 		// Perhaps set maxNode=negativeLimit when the tree is empty
 		return Iterator{root, negativeLimitNode}
 	}
-	return  Iterator{root, root.maxNode}
+	return Iterator{root, root.maxNode}
 }
 
 // Create an iterator that points beyond the maximum item in the tree
@@ -76,7 +82,7 @@ func (root *Tree) Limit() Iterator {
 
 // Create an iterator that points before the minimum item in the tree
 func (root *Tree) NegativeLimit() Iterator {
-	return  Iterator{root, negativeLimitNode}
+	return Iterator{root, negativeLimitNode}
 }
 
 // Find the smallest element N such that N >= key, and return the
@@ -109,6 +115,70 @@ func (root *Tree) FindLE(key Item) Iterator {
 func (root *Tree) Insert(item Item) bool {
 	// TODO: delay creating n until it is found to be inserted
 	n := root.doInsert(item)
+	if n == nil {
+		return false
+	}
+
+	n.color = red
+
+	for true {
+		// Case 1: N is at the root
+		if n.parent == nil {
+			n.color = black
+			break
+		}
+
+		// Case 2: The parent is black, so the tree already
+		// satisfies the RB properties
+		if n.parent.color == black {
+			break
+		}
+
+		// Case 3: parent and uncle are both red.
+		// Then paint both black and make grandparent red.
+		grandparent := n.parent.parent
+		var uncle *node
+		if n.parent.isLeftChild() {
+			uncle = grandparent.right
+		} else {
+			uncle = grandparent.left
+		}
+		if uncle != nil && uncle.color == red {
+			n.parent.color = black
+			uncle.color = black
+			grandparent.color = red
+			n = grandparent
+			continue
+		}
+
+		// Case 4: parent is red, uncle is black (1)
+		if n.isRightChild() && n.parent.isLeftChild() {
+			root.rotateLeft(n.parent)
+			n = n.left
+			continue
+		}
+		if n.isLeftChild() && n.parent.isRightChild() {
+			root.rotateRight(n.parent)
+			n = n.right
+			continue
+		}
+
+		// Case 5: parent is read, uncle is black (2)
+		n.parent.color = black
+		grandparent.color = red
+		if n.isLeftChild() {
+			root.rotateRight(grandparent)
+		} else {
+			root.rotateLeft(grandparent)
+		}
+		break
+	}
+	return true
+}
+
+func (root *Tree) Insert2(item Item) bool {
+	// TODO: delay creating n until it is found to be inserted
+	n := root.doInsert2(item)
 	if n == nil {
 		return false
 	}
@@ -389,11 +459,29 @@ func (root *Tree) maybeSetMinNode(n *node) {
 	}
 }
 
+func (root *Tree) maybeSetMinNode2(n *node) {
+	if root.minNode == nil {
+		root.minNode = n
+		root.maxNode = n
+	} else if root.inscmp(n.item, root.minNode.item) < 0 {
+		root.minNode = n
+	}
+}
+
 func (root *Tree) maybeSetMaxNode(n *node) {
 	if root.maxNode == nil {
 		root.minNode = n
 		root.maxNode = n
 	} else if root.compare(n.item, root.maxNode.item) > 0 {
+		root.maxNode = n
+	}
+}
+
+func (root *Tree) maybeSetMaxNode2(n *node) {
+	if root.maxNode == nil {
+		root.minNode = n
+		root.maxNode = n
+	} else if root.inscmp(n.item, root.maxNode.item) > 0 {
 		root.maxNode = n
 	}
 }
@@ -439,6 +527,45 @@ func (root *Tree) doInsert(item Item) *node {
 	panic("should not reach here")
 }
 
+func (root *Tree) doInsert2(item Item) *node {
+	if root.root == nil {
+		n := &node{item: item}
+		root.root = n
+		root.minNode = n
+		root.maxNode = n
+		root.count++
+		return n
+	}
+	parent := root.root
+	for true {
+		comp := root.inscmp(item, parent.item)
+		if comp == 0 {
+			return nil
+		} else if comp < 0 {
+			if parent.left == nil {
+				n := &node{item: item, parent: parent}
+				parent.left = n
+				root.count++
+				root.maybeSetMinNode2(n)
+				return n
+			} else {
+				parent = parent.left
+			}
+		} else {
+			if parent.right == nil {
+				n := &node{item: item, parent: parent}
+				parent.right = n
+				root.count++
+				root.maybeSetMaxNode2(n)
+				return n
+			} else {
+				parent = parent.right
+			}
+		}
+	}
+	panic("should not reach here")
+}
+
 // Find a node whose item >= key. The 2nd return value is true iff the
 // node.item==key. Returns (nil, false) if all nodes in the tree are <
 // key.
@@ -473,7 +600,6 @@ func (root *Tree) findGE(key Item) (*node, bool) {
 	}
 	panic("should not reach here")
 }
-
 
 // Delete N from the tree.
 func (root *Tree) doDelete(n *node) {
